@@ -1,0 +1,97 @@
+name: Build
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: write # needed to attach the app to a Release on tags
+
+jobs:
+  build:
+    # Needs a runner that ships the Writing Tools private frameworks (macOS 15.1+).
+    # For the Icon Composer icon (Liquid Glass) and the real macOS 27 SDK, use a
+    # macOS 26/Xcode 26 runner once GitHub offers it (bump `runs-on` then).
+    runs-on: macos-15
+
+    # Surface the presence of optional secrets to step-level `if:` conditions.
+    env:
+      MACOS_CERTIFICATE_P12_BASE64: ${{ secrets.MACOS_CERTIFICATE_P12_BASE64 }}
+      AC_API_KEY_P8_BASE64: ${{ secrets.AC_API_KEY_P8_BASE64 }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Show toolchain
+        run: |
+          sw_vers
+          xcodebuild -version
+          echo "SDK: $(xcrun --show-sdk-path)"
+
+      # --- Optional: custom signing (Developer ID) --------------------------
+      # Provide these repo secrets to sign with your own cert instead of ad-hoc:
+      #   MACOS_CERTIFICATE_P12_BASE64  base64 of a .p12 exported from Keychain
+      #   MACOS_CERTIFICATE_PASSWORD    the .p12 export password
+      #   MACOS_SIGN_IDENTITY           (optional) exact identity name; auto-detected otherwise
+      - name: Import signing certificate
+        if: env.MACOS_CERTIFICATE_P12_BASE64 != ''
+        env:
+          MACOS_CERTIFICATE_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
+          MACOS_SIGN_IDENTITY: ${{ secrets.MACOS_SIGN_IDENTITY }}
+        run: |
+          set -euo pipefail
+          KC="$RUNNER_TEMP/build.keychain-db"
+          KCPASS="ci-$GITHUB_RUN_ID"
+          security create-keychain -p "$KCPASS" "$KC"
+          security set-keychain-settings -lut 21600 "$KC"
+          security unlock-keychain -p "$KCPASS" "$KC"
+          echo "$MACOS_CERTIFICATE_P12_BASE64" | base64 -d > "$RUNNER_TEMP/cert.p12"
+          security import "$RUNNER_TEMP/cert.p12" -k "$KC" -P "$MACOS_CERTIFICATE_PASSWORD" -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple: -s -k "$KCPASS" "$KC" >/dev/null
+          # Make the new keychain searchable (keep the login keychain too).
+          security list-keychains -d user -s "$KC" $(security list-keychains -d user | sed 's/"//g')
+          IDENT="${MACOS_SIGN_IDENTITY:-}"
+          [ -z "$IDENT" ] && IDENT=$(security find-identity -v -p codesigning "$KC" | sed -n 's/.*"\(Developer ID Application: .*\)"/\1/p' | head -1)
+          echo "Using signing identity: $IDENT"
+          echo "WT_SIGN_IDENTITY=$IDENT" >> "$GITHUB_ENV"
+          rm -f "$RUNNER_TEMP/cert.p12"
+
+      - name: Build
+        run: ./build-app.sh
+
+      - name: Package
+        run: ditto -c -k --keepParent build/Siriously.app Siriously.app.zip
+
+      # --- Optional: notarization + stapling --------------------------------
+      # Provide an App Store Connect API key to notarize:
+      #   AC_API_KEY_P8_BASE64  base64 of the AuthKey_XXXX.p8
+      #   AC_API_KEY_ID         the key ID
+      #   AC_API_ISSUER_ID      the issuer UUID
+      - name: Notarize & staple
+        if: env.MACOS_CERTIFICATE_P12_BASE64 != '' && env.AC_API_KEY_P8_BASE64 != ''
+        env:
+          AC_API_KEY_ID: ${{ secrets.AC_API_KEY_ID }}
+          AC_API_ISSUER_ID: ${{ secrets.AC_API_ISSUER_ID }}
+        run: |
+          set -euo pipefail
+          echo "$AC_API_KEY_P8_BASE64" | base64 -d > "$RUNNER_TEMP/ac.p8"
+          xcrun notarytool submit Siriously.app.zip \
+            --key "$RUNNER_TEMP/ac.p8" --key-id "$AC_API_KEY_ID" --issuer "$AC_API_ISSUER_ID" --wait
+          xcrun stapler staple build/Siriously.app
+          rm -f "$RUNNER_TEMP/ac.p8" Siriously.app.zip
+          ditto -c -k --keepParent build/Siriously.app Siriously.app.zip
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Siriously.app
+          path: Siriously.app.zip
+
+      - name: Attach to release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: Siriously.app.zip

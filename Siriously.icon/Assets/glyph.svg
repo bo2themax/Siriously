@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="30" height="36" viewBox="0 0 30 36">
+  <defs>
+    <linearGradient id="siriously" x1="15" y1="0" x2="15" y2="36" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#FFE2B8"/>
+      <stop offset=".45" stop-color="#FF8FB4"/>
+      <stop offset="1" stop-color="#7B5BFF"/>
+    </linearGradient>
+  </defs>
+  <!-- fountain-pen nib (writing) -->
+  <path fill="url(#siriously)"
+        d="M8 6 a2 2 0 0 1 2 -2 h10 a2 2 0 0 1 2 2 v8 C22 22 19 28 15 33 C11 28 8 22 8 14 Z"/>
+  <!-- breather hole + slit -->
+  <circle cx="15" cy="11.5" r="2" fill="#241a3d"/>
+  <rect x="14.1" y="13.5" width="1.8" height="10.5" rx="0.9" fill="#241a3d"/>
+  <!-- sparkle accent (magic text) -->
+  <path fill="url(#siriously)"
+        d="M25 2 Q25 5 28 5 Q25 5 25 8 Q25 5 22 5 Q25 5 25 2 Z"/>
+</svg>
