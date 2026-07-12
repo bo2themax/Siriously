@@ -17,7 +17,7 @@ cat > "$APP/Contents/Info.plist" <<'PLIST'
   <key>CFBundleIdentifier</key><string>bo2themax.siriously</string>
   <key>CFBundleExecutable</key><string>Siriously</string>
   <key>CFBundlePackageType</key><string>APPL</string>
-  <key>CFBundleShortVersionString</key><string>0.0.1</string>
+  <key>CFBundleShortVersionString</key><string>0.0.2</string>
   <key>CFBundleIconFile</key><string>Siriously</string>
   <key>CFBundleIconName</key><string>Siriously</string>
   <key>LSMinimumSystemVersion</key><string>27.0</string>
