@@ -22,16 +22,30 @@ import ObjectiveC
 // isn't us. `frontmostApplication` is unreliable here because the Services launch
 // brings our agent forward before the service method runs. (Owner pid / layer
 // don't require Screen Recording permission.)
+//
+// macOS 26/27 floats `com.apple.WindowManager`-owned windows (Stage Manager /
+// desktop tiling) at the *normal* window layer, so the raw front-most layer-0
+// owner is now WindowManager, not the app the user selected text in — which broke
+// AX capture entirely (wrong pid → no focused element → nil context). Filter to
+// owners that are real foreground apps (activationPolicy == .regular); background
+// UI agents (WindowManager, Dock, Control Center, WindowServer) are .accessory/
+// .prohibited and get skipped. Fall back to the first non-self window if nothing
+// qualifies, preserving the old behaviour.
 func frontmostHostPid() -> pid_t? {
     let mypid = ProcessInfo.processInfo.processIdentifier
     let opts: CGWindowListOption = [.optionOnScreenOnly, .excludeDesktopElements]
     guard let list = CGWindowListCopyWindowInfo(opts, kCGNullWindowID) as? [[String: Any]] else { return nil }
+    var fallback: pid_t? = nil
     for w in list {  // front-to-back order
         guard (w[kCGWindowLayer as String] as? Int) == 0,                 // normal window layer
               let pid = w[kCGWindowOwnerPID as String] as? pid_t, pid != mypid else { continue }
-        return pid
+        if fallback == nil { fallback = pid }
+        // Prefer a genuine foreground app; skip WindowManager & other UI agents.
+        if NSRunningApplication(processIdentifier: pid)?.activationPolicy == .regular {
+            return pid
+        }
     }
-    return nil
+    return fallback
 }
 
 struct AXContext {
@@ -346,11 +360,17 @@ final class Session {
         }
     }
 
-    // Promptly hand focus back to the host app so the user can keep typing.
+    // Promptly hand focus back to the host app so the user can keep typing —
+    // but only if the user hasn't already switched to a different app since the
+    // popover appeared. This runs off timers (0.12s write-back debounce, 1.5s
+    // end-poll grace), so an unconditional activate() would yank the user back to
+    // the original app seconds after they deliberately moved on.
     func returnFocusToHost() {
+        let weAreActive = NSRunningApplication.current.isActive
         anchorWindow?.orderOut(nil)
         clientWindow?.orderOut(nil)
-        hostApp?.activate()
+        if weAreActive { hostApp?.activate() }
+        else { NSLog("WT: user switched away — leaving focus where it is") }
     }
 
     // Fallback for apps AX can't set text on (e.g. VSCode/Electron): show the
@@ -462,8 +482,11 @@ final class Session {
                 }
             }
         }
+        let weAreActive = NSRunningApplication.current.isActive
         anchorWindow?.close(); clientWindow?.close()
-        if !replaced { hostApp?.activate() }   // return focus on plain dismiss too
+        // Return focus on plain dismiss too — but not if the user already switched
+        // to another app (this fires off the 1.5s end-poll grace timer).
+        if !replaced && weAreActive { hostApp?.activate() }
         cleanup(self)
     }
 }
