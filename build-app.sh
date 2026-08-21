@@ -92,14 +92,28 @@ swiftc -O \
 
 # Compile the Icon Composer icon (Liquid Glass) into the bundle: produces
 # Assets.car (modern, CFBundleIconName) + Siriously.icns (fallback, CFBundleIconFile).
+# Needs Xcode 26+; failing here is fatal so we never ship an icon-less app.
 if [ -d "$PWD/Siriously.icon" ]; then
-  xcrun actool "$PWD/Siriously.icon" \
+  ICONLOG="$PWD/build/actool.log"
+  if ! xcrun actool "$PWD/Siriously.icon" \
     --compile "$PWD/$APP/Contents/Resources" \
     --app-icon Siriously \
-    --platform macosx --minimum-deployment-target 27.0 \
-    --output-partial-info-plist /tmp/wt-icon-partial.plist \
-    --output-format human-readable-text 2>&1 | grep -i error || true
-  [ -f "$PWD/$APP/Contents/Resources/Siriously.icns" ] && echo "icon compiled" || echo "icon compile FAILED"
+    --platform macosx --minimum-deployment-target 26.0 \
+    --output-partial-info-plist "$PWD/build/icon-partial.plist" \
+    --output-format human-readable-text >"$ICONLOG" 2>&1; then
+    echo "icon compile FAILED (actool exited non-zero) — need Xcode 26+, have:" >&2
+    xcodebuild -version >&2 || true
+    cat "$ICONLOG" >&2
+    exit 1
+  fi
+  if [ ! -f "$APP/Contents/Resources/Siriously.icns" ] || [ ! -f "$APP/Contents/Resources/Assets.car" ]; then
+    echo "icon compile FAILED (actool produced no Siriously.icns/Assets.car)" >&2
+    cat "$ICONLOG" >&2
+    exit 1
+  fi
+  echo "icon compiled"
+else
+  echo "no Siriously.icon — app will have no icon" >&2
 fi
 
 # Signing. Priority:

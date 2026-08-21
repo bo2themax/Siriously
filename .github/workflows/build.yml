@@ -12,10 +12,9 @@ permissions:
 
 jobs:
   build:
-    # Needs a runner that ships the Writing Tools private frameworks (macOS 15.1+).
-    # For the Icon Composer icon (Liquid Glass) and the real macOS 27 SDK, use a
-    # macOS 26/Xcode 26 runner once GitHub offers it (bump `runs-on` then).
-    runs-on: macos-15
+    # Needs the Writing Tools private frameworks (macOS 15.1+) and Xcode 26+,
+    # the first actool that can compile a `.icon` bundle.
+    runs-on: macos-26
 
     # Surface the presence of optional secrets to step-level `if:` conditions.
     env:
