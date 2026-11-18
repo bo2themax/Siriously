@@ -92,9 +92,13 @@ popover's `isShown` as a safety net with a grace window > the transient close→
   `kAXSelectedTextAttribute`.
 - **Coordinate flip:** AX/Quartz are top-left-origin global; Cocoa is bottom-left.
   `cocoaY = primaryScreenHeight − axY − height`.
-- **Electron/Qt (VSCode):** no AX focused element and AX text isn't writable → fall back
-  to a Copy alert; anchor at the focused **window** rect (`AXUIElementCreateApplication(pid)`
-  → `kAXFocusedWindow` → position/size), which is available even when the element isn't.
+- **Chromium/Electron/Qt (Teams, VSCode):** no AX focused element and AX text isn't
+  writable → paste instead: set the pasteboard (marked `org.nspasteboard.TransientType`),
+  reactivate the host, wait until it is frontmost, post ⌘V via `CGEvent`, then restore the
+  previous pasteboard if nothing else changed it. Skip the paste and fall back to a Copy
+  alert if the user already switched apps. Anchor at the focused **window** rect
+  (`AXUIElementCreateApplication(pid)` → `kAXFocusedWindow` → position/size), which is
+  available even when the element isn't.
 
 ## Reliability gotchas
 
