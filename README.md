@@ -64,8 +64,11 @@ an empty/non-functional popover — there's no engine for it to talk to.
    `-[WTWritingToolsRemoteViewController replaceSelectionWithText:]`), restore the
    original selection range and set the host element's selected text via AX
    (`AXUIElementSetAttributeValue`), then promptly reactivate the host app so the user
-   can keep typing. For apps AX can't write to (Electron/Qt such as VSCode — no AX
-   focused element), show an alert with the result and a **Copy** button instead.
+   can keep typing. For apps AX can't write to (Chromium/Electron/Qt such as Teams or
+   VSCode — no AX focused element), put the result on the pasteboard, reactivate the host
+   and send **⌘V** over its still-active selection, then restore the previous pasteboard
+   contents. If that can't be done safely (the user already switched apps, the host never
+   came to the front), show an alert with the result and a **Copy** button instead.
 
 Reliability details handled: the view service is **pre-warmed** and presentation is
 **gated on warm-up** (no empty popover); the original selection **range is restored**
@@ -193,8 +196,10 @@ a matching `NSServices` entry in `build-app.sh`.
 - **Transient instances.** macOS launches a Services provider on demand and lets it
   exit after; `--resident` keeps one warm to avoid cold-start.
 - **AX-dependent.** Native apps (TextEdit/Notes/Safari/…) replace in place via AX. Apps
-  with no AX text support (VSCode/Electron) can't be written to — the result is offered
-  via a Copy alert instead, and the popover anchors at the focused window's center
+  with no AX text support (Teams/VSCode/Electron) can't be written to via AX — the result
+  is pasted with a synthetic ⌘V instead (this relies on the host keeping its selection
+  while inactive, and uses the physical `V` key, so non-QWERTY layouts may differ), with a
+  Copy alert as the last resort. The popover anchors at the focused window's center
   (no selection rect is available). Services items register with broad send types and no
   return type, so they appear for any text selection (editable or not).
 - **Private API / OS-version-bound.** Selectors were recovered on 26A5368g; an OS update

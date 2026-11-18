@@ -354,8 +354,10 @@ final class Session {
             if let ax = self.ax, ax.writeBack(result) {
                 self.returnFocusToHost()
             } else {
-                NSLog("WT: AX unavailable — offering result via alert")
-                self.showResultAlert(result)
+                // Chromium/Electron (Teams, Slack, VSCode…): AX can't write, so
+                // paste the result into the host's still-active selection.
+                NSLog("WT: AX unavailable — pasting into host via Cmd+V")
+                self.pasteIntoHost(result)
             }
         }
     }
@@ -373,8 +375,81 @@ final class Session {
         else { NSLog("WT: user switched away — leaving focus where it is") }
     }
 
-    // Fallback for apps AX can't set text on (e.g. VSCode/Electron): show the
-    // result and let the user choose to copy it (then paste manually).
+    // Fallback for apps AX can't write to (Chromium/Electron): put the result on
+    // the pasteboard, hand focus back to the host and send Cmd+V so it replaces the
+    // host's selection (which survives deactivation). The user's previous
+    // pasteboard contents are restored afterwards. If we can't do this safely
+    // (user already switched apps, host never came to front, event creation
+    // failed) we fall back to the manual Copy alert instead of pasting blindly.
+    func pasteIntoHost(_ text: String) {
+        guard let hostApp, NSRunningApplication.current.isActive else {
+            NSLog("WT: paste skipped (no host or user switched away) — alert")
+            showResultAlert(text)
+            return
+        }
+        let pb = NSPasteboard.general
+        let saved: [[(NSPasteboard.PasteboardType, Data)]] = (pb.pasteboardItems ?? []).map { item in
+            item.types.compactMap { t in item.data(forType: t).map { (t, $0) } }
+        }
+        pb.clearContents()
+        let item = NSPasteboardItem()
+        item.setString(text, forType: .string)
+        // Hint to clipboard managers not to record this transient value.
+        item.setData(Data(), forType: NSPasteboard.PasteboardType("org.nspasteboard.TransientType"))
+        pb.writeObjects([item])
+        let ours = pb.changeCount
+
+        let restore = {
+            // Only restore if nobody (e.g. the user) has changed the pasteboard since.
+            guard pb.changeCount == ours else { return }
+            pb.clearContents()
+            let items = saved.map { entry -> NSPasteboardItem in
+                let it = NSPasteboardItem()
+                entry.forEach { it.setData($0.1, forType: $0.0) }
+                return it
+            }
+            if !items.isEmpty { pb.writeObjects(items) }
+        }
+
+        anchorWindow?.orderOut(nil); clientWindow?.orderOut(nil)
+        hostApp.activate()
+
+        let deadline = Date().addingTimeInterval(1.0)
+        func attempt() {
+            if NSWorkspace.shared.frontmostApplication?.processIdentifier == hostApp.processIdentifier {
+                // Let the host's key window / first responder settle before pasting.
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
+                    if Session.postCommandV() {
+                        NSLog("WT: Cmd+V sent to %@", hostApp.bundleIdentifier ?? "?")
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.8, execute: restore)
+                    } else {
+                        restore()
+                        self.showResultAlert(text)
+                    }
+                }
+            } else if Date() < deadline {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.05, execute: attempt)
+            } else {
+                NSLog("WT: host never became frontmost — alert")
+                restore()
+                self.showResultAlert(text)
+            }
+        }
+        attempt()
+    }
+
+    static func postCommandV() -> Bool {
+        let vKey: CGKeyCode = 9  // kVK_ANSI_V
+        guard let src = CGEventSource(stateID: .combinedSessionState),
+              let down = CGEvent(keyboardEventSource: src, virtualKey: vKey, keyDown: true),
+              let up = CGEvent(keyboardEventSource: src, virtualKey: vKey, keyDown: false) else { return false }
+        down.flags = .maskCommand; up.flags = .maskCommand
+        down.post(tap: .cghidEventTap); up.post(tap: .cghidEventTap)
+        return true
+    }
+
+    // Last resort when the result can't be written or pasted: show it and let the
+    // user choose to copy it (then paste manually).
     func showResultAlert(_ text: String) {
         anchorWindow?.orderOut(nil); clientWindow?.orderOut(nil)
         NSApp.activate(ignoringOtherApps: true)
